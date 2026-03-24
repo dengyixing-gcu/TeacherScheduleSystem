@@ -5,11 +5,12 @@ from datetime import datetime, timedelta
 import json
 import os
 
-app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FILE = os.path.join(BASE_DIR, '教师课表 1.xlsx')
+CACHE_FILE = os.path.join(BASE_DIR, 'schedule_cache.json')
 
+app = Flask(__name__)
 SEMESTER_START = datetime(2026, 3, 2)
-DATA_FILE = '教师课表 1.xlsx'
-CACHE_FILE = 'schedule_cache.json'
 
 def parse_weeks(week_str):
     weeks = []
@@ -101,6 +102,8 @@ def load_data():
     return schedule
 
 def get_schedule():
+    if not os.path.exists(CACHE_FILE):
+        return load_data()
     with open(CACHE_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
 
