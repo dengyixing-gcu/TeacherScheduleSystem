@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教师课表管理系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 32px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            padding: 12px 24px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 2px solid rgba(255,255,255,0.5);
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+
+        .tab-btn:hover, .tab-btn.active {
+            background: white;
+            color: #667eea;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: none;
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        .search-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .search-row label {
+            font-weight: 600;
+            color: #333;
+            min-width: 80px;
+        }
+
+        .search-row select, .search-row input {
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .search-row select:focus, .search-row input:focus {
+            border-color: #667eea;
+        }
+
+        .search-row button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .search-row button:hover {
+            transform: scale(1.05);
+        }
+
+        .schedule-grid {
+            display: grid;
+            gap: 15px;
+        }
+
+        .course-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            border-radius: 15px;
+            padding: 20px;
+            border-left: 5px solid #667eea;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .course-card:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        .course-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .course-name {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .teacher-name {
+            font-size: 16px;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .course-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .info-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-icon {
+            font-size: 18px;
+        }
+
+        .info-text {
+            color: #555;
+            font-size: 14px;
+        }
+
+        .info-label {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 900px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            color: #333;
+        }
+
+        .close-btn {
+            font-size: 24px;
+            cursor: pointer;
+            color: #888;
+        }
+
+        .close-btn:hover {
+            color: #333;
+        }
+
+        .reschedule-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        @media (max-width: 768px) {
+            .reschedule-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .reschedule-side {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+        }
+
+        .reschedule-side h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 15px;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            border-color: #667eea;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        .submit-btn:hover {
+            transform: scale(1.02);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .weekday-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #667eea;
+            color: white;
+            border-radius: 20px;
+            font-size: 14px;
+            margin-right: 5px;
+        }
+
+        .lesson-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #764ba2;
+            color: white;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: bold;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .course-list-item {
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            border: 2px solid #e0e0e0;
+            transition: all 0.2s;
+        }
+
+        .course-list-item:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .course-list-item.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .arrow-divider {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 教师课表管理系统</h1>
+        
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('teacher')">按教师查询</button>
+            <button class="tab-btn" onclick="showTab('date')">按日期时段查询</button>
+            <button class="tab-btn" onclick="showTab('all')">全部课表</button>
+            <button class="tab-btn" onclick="showTab('reschedule')">🔄 调课</button>
+        </div>
+
+        <div id="teacherPanel" class="panel active">
+            <div class="search-row">
+                <label>选择教师：</label>
+                <select id="teacherSelect"></select>
+                <button onclick="searchByTeacher()">查询</button>
+            </div>
+            <div id="teacherResult" class="schedule-grid"></div>
+        </div>
+
+        <div id="datePanel" class="panel">
+            <div class="search-row">
+                <label>选择日期：</label>
+                <input type="date" id="dateInput">
+                <label>时段：</label>
+                <select id="lessonStart">
+                    <option value="">全天</option>
+                    <option value="1">第 1 节</option>
+                    <option value="2">第 2 节</option>
+                    <option value="3">第 3 节</option>
+                    <option value="4">第 4 节</option>
+                    <option value="5">第 5 节</option>
+                    <option value="6">第 6 节</option>
+                    <option value="7">第 7 节</option>
+                    <option value="8">第 8 节</option>
+                    <option value="9">第 9 节</option>
+                    <option value="10">第 10 节</option>
+                    <option value="11">第 11 节</option>
+                </select>
+                <span>至</span>
+                <select id="lessonEnd">
+                    <option value="">全天</option>
+                    <option value="1">第 1 节</option>
+                    <option value="2">第 2 节</option>
+                    <option value="3">第 3 节</option>
+                    <option value="4">第 4 节</option>
+                    <option value="5">第 5 节</option>
+                    <option value="6">第 6 节</option>
+                    <option value="7">第 7 节</option>
+                    <option value="8">第 8 节</option>
+                    <option value="9">第 9 节</option>
+                    <option value="10">第 10 节</option>
+                    <option value="11">第 11 节</option>
+                </select>
+                <button onclick="searchByDate()">查询</button>
+            </div>
+            <div id="dateInfo" style="margin-bottom: 20px; color: #667eea; font-weight: 600;"></div>
+            <div id="dateResult" class="schedule-grid"></div>
+        </div>
+
+        <div id="allPanel" class="panel">
+            <div class="stats-row" id="statsRow"></div>
+            <div id="allResult" class="schedule-grid"></div>
+        </div>
+
+        <div id="reschedulePanel" class="panel">
+            <div class="reschedule-container">
+                <div class="reschedule-side">
+                    <h3>📅 原课程安排</h3>
+                    <div class="form-group">
+                        <label>选择日期</label>
+                        <input type="date" id="rescheduleOldDate">
+                    </div>
+                    <div class="form-group">
+                        <label>节次范围</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="number" id="rescheduleOldStart" placeholder="开始" min="1" max="11" value="1">
+                            <input type="number" id="rescheduleOldEnd" placeholder="结束" min="1" max="11" value="2">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>选择课程</label>
+                        <select id="rescheduleOldCourse">
+                            <option value="">请先查询原课程</option>
+                        </select>
+                    </div>
+                    <button class="submit-btn" onclick="searchOldCourse()">查询原课程</button>
+                </div>
+
+                <div class="arrow-divider">➜</div>
+
+                <div class="reschedule-side">
+                    <h3>📅 调整后安排</h3>
+                    <div class="form-group">
+                        <label>新日期</label>
+                        <input type="date" id="rescheduleNewDate">
+                    </div>
+                    <div class="form-group">
+                        <label>新节次范围</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="number" id="rescheduleNewStart" placeholder="开始" min="1" max="11" value="1">
+                            <input type="number" id="rescheduleNewEnd" placeholder="结束" min="1" max="11" value="2">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>新地点（可选）</label>
+                        <input type="text" id="rescheduleNewLocation" placeholder="输入新教室">
+                    </div>
+                </div>
+            </div>
+            <button class="submit-btn" onclick="submitReschedule()">确认调课</button>
+        </div>
+    </div>
+
+    <div id="notification" style="position: fixed; top: 20px; right: 20px; background: #38ef7d; color: white; padding: 15px 25px; border-radius: 8px; transform: translateX(400px); transition: transform 0.3s; z-index: 1001;"></div>
+
+    <script>
+        const WEEKDAY_NAMES = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+        let allSchedule = [];
+        let selectedOldCourse = null;
+
+        function showNotification(msg, isError) {
+            const el = document.getElementById('notification');
+            el.textContent = msg;
+            el.style.background = isError ? '#ff4757' : '#38ef7d';
+            el.className = 'show';
+            el.style.transform = 'translateX(0)';
+            setTimeout(() => {
+                el.style.transform = 'translateX(400px)';
+            }, 3000);
+        }
+
+        async function loadTeachers() {
+            const res = await fetch('/api/teachers');
+            const teachers = await res.json();
+            const select = document.getElementById('teacherSelect');
+            select.innerHTML = '<option value="">请选择教师</option>';
+            teachers.forEach(t => {
+                select.innerHTML += `<option value="${t}">${t}</option>`;
+            });
+        }
+
+        async function loadSchedule() {
+            const res = await fetch('/api/schedule');
+            allSchedule = await res.json();
+            renderAllSchedule();
+        }
+
+        function showTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(panel => panel.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tab + 'Panel').classList.add('active');
+            
+            if (tab === 'all') {
+                renderAllSchedule();
+            }
+        }
+
+        function renderCourseCard(course) {
+            return `
+                <div class="course-card">
+                    <div class="course-header">
+                        <span class="course-name">${course.course}</span>
+                        <span class="teacher-name">${course.teacher}</span>
+                    </div>
+                    <div class="course-info">
+                        <div class="info-item">
+                            <span class="info-icon">📅</span>
+                            <div>
+                                <div class="info-label">时间</div>
+                                <div class="info-text">
+                                    <span class="weekday-badge">${WEEKDAY_NAMES[course.weekday]}</span>
+                                    <span class="lesson-badge">第${course.start_lesson}-${course.end_lesson}节</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-icon">📍</span>
+                            <div>
+                                <div class="info-label">地点</div>
+                                <div class="info-text">${course.location}</div>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-icon">📚</span>
+                            <div>
+                                <div class="info-label">周次</div>
+                                <div class="info-text">${course.weeks.join(', ')}周</div>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-icon">👥</span>
+                            <div>
+                                <div class="info-label">班级</div>
+                                <div class="info-text">${course.classes}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function searchByTeacher() {
+            const teacher = document.getElementById('teacherSelect').value;
+            if (!teacher) {
+                showNotification('请选择教师', true);
+                return;
+            }
+            const res = await fetch(`/api/teacher/${encodeURIComponent(teacher)}`);
+            const schedule = await res.json();
+            const container = document.getElementById('teacherResult');
+            if (schedule.length === 0) {
+                container.innerHTML = '<div class="empty-state">该教师暂无课程</div>';
+            } else {
+                container.innerHTML = schedule.map(c => renderCourseCard(c)).join('');
+            }
+        }
+
+        async function searchByDate() {
+            const date = document.getElementById('dateInput').value;
+            const startLesson = document.getElementById('lessonStart').value;
+            const endLesson = document.getElementById('lessonEnd').value;
+            
+            if (!date) {
+                showNotification('请选择日期', true);
+                return;
+            }
+            
+            const res = await fetch('/api/date_schedule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    date: date,
+                    start_lesson: startLesson || null,
+                    end_lesson: endLesson || null
+                })
+            });
+            const data = await res.json();
+            
+            let infoText = `${date} (第${data.week}周，${WEEKDAY_NAMES[data.weekday]})`;
+            if (startLesson && endLesson) {
+                infoText += ` 第${startLesson}-${endLesson}节`;
+            } else {
+                infoText += ' 全天';
+            }
+            document.getElementById('dateInfo').textContent = infoText;
+            
+            const container = document.getElementById('dateResult');
+            if (data.schedule.length === 0) {
+                container.innerHTML = '<div class="empty-state">该时段暂无课程</div>';
+            } else {
+                container.innerHTML = data.schedule.map(c => renderCourseCard(c)).join('');
+            }
+        }
+
+        function renderAllSchedule() {
+            const container = document.getElementById('allResult');
+            const statsContainer = document.getElementById('statsRow');
+            
+            const teachers = [...new Set(allSchedule.map(c => c.teacher))];
+            const courses = [...new Set(allSchedule.map(c => c.course))];
+            
+            statsContainer.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${allSchedule.length}</div>
+                    <div class="stat-label">总课程数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${teachers.length}</div>
+                    <div class="stat-label">教师人数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${courses.length}</div>
+                    <div class="stat-label">课程种类</div>
+                </div>
+            `;
+            
+            container.innerHTML = allSchedule.map(c => renderCourseCard(c)).join('');
+        }
+
+        async function searchOldCourse() {
+            const date = document.getElementById('rescheduleOldDate').value;
+            const startLesson = document.getElementById('rescheduleOldStart').value;
+            const endLesson = document.getElementById('rescheduleOldEnd').value;
+            
+            if (!date) {
+                showNotification('请选择日期', true);
+                return;
+            }
+            
+            const res = await fetch('/api/date_schedule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    date: date,
+                    start_lesson: startLesson,
+                    end_lesson: endLesson
+                })
+            });
+            const data = await res.json();
+            
+            const select = document.getElementById('rescheduleOldCourse');
+            if (data.schedule.length === 0) {
+                select.innerHTML = '<option value="">该时段暂无课程</option>';
+                selectedOldCourse = null;
+            } else {
+                select.innerHTML = '<option value="">请选择课程</option>';
+                data.schedule.forEach(c => {
+                    select.innerHTML += `<option value="${c.id}" data-teacher="${c.teacher}" data-course="${c.course}" data-weekday="${c.weekday}" data-start="${c.start_lesson}" data-end="${c.end_lesson}" data-weeks='${JSON.stringify(c.weeks)}'>${c.course} - ${c.teacher} (${WEEKDAY_NAMES[c.weekday]} 第${c.start_lesson}-${c.end_lesson}节)</option>`;
+                });
+            }
+        }
+
+        document.getElementById('rescheduleOldCourse').addEventListener('change', function() {
+            const option = this.options[this.selectedIndex];
+            if (option.value) {
+                selectedOldCourse = {
+                    id: option.value,
+                    teacher: option.dataset.teacher,
+                    course: option.dataset.course,
+                    weekday: parseInt(option.dataset.weekday),
+                    start_lesson: parseInt(option.dataset.start),
+                    end_lesson: parseInt(option.dataset.end),
+                    weeks: JSON.parse(option.dataset.weeks)
+                };
+            } else {
+                selectedOldCourse = null;
+            }
+        });
+
+        async function submitReschedule() {
+            if (!selectedOldCourse) {
+                showNotification('请选择原课程', true);
+                return;
+            }
+            
+            const newDate = document.getElementById('rescheduleNewDate').value;
+            const newStart = document.getElementById('rescheduleNewStart').value;
+            const newEnd = document.getElementById('rescheduleNewEnd').value;
+            const newLocation = document.getElementById('rescheduleNewLocation').value;
+            
+            if (!newDate) {
+                showNotification('请选择新日期', true);
+                return;
+            }
+            
+            const oldDate = document.getElementById('rescheduleOldDate').value;
+            
+            const res = await fetch('/api/reschedule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    old_date: oldDate,
+                    old_start_lesson: selectedOldCourse.start_lesson,
+                    old_end_lesson: selectedOldCourse.end_lesson,
+                    old_teacher: selectedOldCourse.teacher,
+                    new_date: newDate,
+                    new_start_lesson: newStart,
+                    new_end_lesson: newEnd,
+                    new_weekday: new Date(newDate).getDay() - 1,
+                    new_location: newLocation
+                })
+            });
+            const result = await res.json();
+            
+            if (result.success) {
+                showNotification('调课成功！');
+                setTimeout(() => {
+                    location.reload();
+                }, 1500);
+            } else {
+                showNotification(result.message || '调课失败', true);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('dateInput').value = today;
+            document.getElementById('rescheduleOldDate').value = today;
+            document.getElementById('rescheduleNewDate').value = today;
+            loadTeachers();
+            loadSchedule();
+        });
+    </script>
+</body>
+</html>
