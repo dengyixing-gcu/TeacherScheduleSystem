@@ -354,6 +354,27 @@
             color: white;
         }
 
+        .teacher-tag {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border-radius: 20px;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .teacher-tag .remove-btn {
+            cursor: pointer;
+            font-weight: bold;
+            opacity: 0.8;
+        }
+
+        .teacher-tag .remove-btn:hover {
+            opacity: 1;
+        }
+
         .arrow-divider {
             display: flex;
             align-items: center;
@@ -362,6 +383,9 @@
             color: #667eea;
         }
     </style>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
 </head>
 <body>
     <div class="container">
@@ -371,7 +395,8 @@
             <button class="tab-btn active" onclick="showTab('teacher')">按教师查询</button>
             <button class="tab-btn" onclick="showTab('date')">按日期时段查询</button>
             <button class="tab-btn" onclick="showTab('all')">全部课表</button>
-            <button class="tab-btn" onclick="showTab('reschedule')">🔄 调课</button>
+            <button class="tab-btn" onclick="showTab('commonFree')">多教师空闲时段</button>
+            <!-- <button class="tab-btn" onclick="showTab('reschedule')">🔄 调课</button> -->
         </div>
 
         <div id="teacherPanel" class="panel active">
@@ -418,9 +443,14 @@
                     <option value="11">第 11 节</option>
                 </select>
                 <button onclick="searchByDate()">查询</button>
+                <button onclick="searchFreeTeachers()">查询没课教师</button>
             </div>
             <div id="dateInfo" style="margin-bottom: 20px; color: #667eea; font-weight: 600;"></div>
             <div id="dateResult" class="schedule-grid"></div>
+            <div id="freeTeachersResult" style="margin-top: 20px; padding: 20px; background: #f0f4ff; border-radius: 15px; display: none;">
+                <h3 style="color: #667eea; margin-bottom: 15px;">没课教师名单</h3>
+                <div id="freeTeachersList"></div>
+            </div>
         </div>
 
         <div id="allPanel" class="panel">
@@ -428,6 +458,59 @@
             <div id="allResult" class="schedule-grid"></div>
         </div>
 
+        <div id="commonFreePanel" class="panel">
+            <div class="search-row">
+                <label>选择教师：</label>
+                <input type="text" id="teacherInput" placeholder="输入教师姓名，按回车添加" style="padding: 12px 16px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 16px; outline: none; transition: border-color 0.3s;" onkeypress="if(event.keyCode===13){addTeacherFromInput();}">
+                <select id="teacherSelect2" onchange="addTeacherFromSelect()">
+                    <option value="">从列表选择</option>
+                </select>
+            </div>
+            <div style="margin-bottom: 20px;">
+                <strong>已选教师：</strong>
+                <div id="selectedTeachersList" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; min-height: 40px; padding: 10px; background: #f8f9fa; border-radius: 10px;">
+                    <span style="color: #888;">暂无已选教师</span>
+                </div>
+            </div>
+            <div class="search-row">
+                <label>日期范围：</label>
+                <input type="date" id="commonFreeStartDate">
+                <span>至</span>
+                <input type="date" id="commonFreeEndDate">
+                <label>时段：</label>
+                <select id="commonFreeLessonStart">
+                    <option value="1">第 1 节</option>
+                    <option value="2">第 2 节</option>
+                    <option value="3">第 3 节</option>
+                    <option value="4">第 4 节</option>
+                    <option value="5">第 5 节</option>
+                    <option value="6">第 6 节</option>
+                    <option value="7">第 7 节</option>
+                    <option value="8">第 8 节</option>
+                    <option value="9">第 9 节</option>
+                    <option value="10">第 10 节</option>
+                    <option value="11">第 11 节</option>
+                </select>
+                <span>至</span>
+                <select id="commonFreeLessonEnd">
+                    <option value="1">第 1 节</option>
+                    <option value="2">第 2 节</option>
+                    <option value="3">第 3 节</option>
+                    <option value="4">第 4 节</option>
+                    <option value="5">第 5 节</option>
+                    <option value="6">第 6 节</option>
+                    <option value="7">第 7 节</option>
+                    <option value="8">第 8 节</option>
+                    <option value="9">第 9 节</option>
+                    <option value="10">第 10 节</option>
+                    <option value="11" selected>第 11 节</option>
+                </select>
+                <button onclick="searchCommonFreeSlots()">查询</button>
+            </div>
+            <div id="commonFreeResult" class="schedule-grid"></div>
+        </div>
+
+        <!-- 调课功能已禁用
         <div id="reschedulePanel" class="panel">
             <div class="reschedule-container">
                 <div class="reschedule-side">
@@ -475,6 +558,7 @@
             </div>
             <button class="submit-btn" onclick="submitReschedule()">确认调课</button>
         </div>
+        -->
     </div>
 
     <div id="notification" style="position: fixed; top: 20px; right: 20px; background: #38ef7d; color: white; padding: 15px 25px; border-radius: 8px; transform: translateX(400px); transition: transform 0.3s; z-index: 1001;"></div>
@@ -483,6 +567,7 @@
         const WEEKDAY_NAMES = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
         let allSchedule = [];
         let selectedOldCourse = null;
+        let selectedTeachers = [];
 
         function showNotification(msg, isError) {
             const el = document.getElementById('notification');
@@ -496,19 +581,30 @@
         }
 
         async function loadTeachers() {
-            const res = await fetch('/api/teachers');
-            const teachers = await res.json();
-            const select = document.getElementById('teacherSelect');
-            select.innerHTML = '<option value="">请选择教师</option>';
-            teachers.forEach(t => {
-                select.innerHTML += `<option value="${t}">${t}</option>`;
-            });
+            try {
+                const res = await fetch('/api/teachers');
+                const teachers = await res.json();
+                const select = document.getElementById('teacherSelect');
+                select.innerHTML = '<option value="">请选择教师</option>';
+                for (let i = 0; i < teachers.length; i++) {
+                    const opt = document.createElement('option');
+                    opt.value = teachers[i];
+                    opt.textContent = teachers[i];
+                    select.appendChild(opt);
+                }
+            } catch (e) {
+                console.error('Error loading teachers:', e);
+            }
         }
 
         async function loadSchedule() {
-            const res = await fetch('/api/schedule');
-            allSchedule = await res.json();
-            renderAllSchedule();
+            try {
+                const res = await fetch('/api/schedule');
+                allSchedule = await res.json();
+                renderAllSchedule();
+            } catch (e) {
+                console.error('Error loading schedule:', e);
+            }
         }
 
         function showTab(tab) {
@@ -520,6 +616,8 @@
             
             if (tab === 'all') {
                 renderAllSchedule();
+            } else if (tab === 'commonFree') {
+                loadTeacherSelect2();
             }
         }
 
@@ -620,6 +718,57 @@
             }
         }
 
+        async function searchFreeTeachers() {
+            const date = document.getElementById('dateInput').value;
+            const startLesson = document.getElementById('lessonStart').value;
+            const endLesson = document.getElementById('lessonEnd').value;
+            
+            if (!date) {
+                showNotification('请选择日期', true);
+                return;
+            }
+            
+            const res = await fetch('/api/free_teachers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    date: date,
+                    start_lesson: startLesson || null,
+                    end_lesson: endLesson || null
+                })
+            });
+            const data = await res.json();
+            
+            let infoText = `${date} (第${data.week}周，${WEEKDAY_NAMES[data.weekday]})`;
+            if (startLesson && endLesson) {
+                infoText += ` 第${startLesson}-${endLesson}节`;
+            } else {
+                infoText += ' 全天';
+            }
+            document.getElementById('dateInfo').textContent = infoText;
+            
+            // 清空课程列表显示
+            const dateResultContainer = document.getElementById('dateResult');
+            dateResultContainer.innerHTML = '';
+            
+            const container = document.getElementById('freeTeachersResult');
+            const listContainer = document.getElementById('freeTeachersList');
+            
+            if (data.free_teachers.length === 0) {
+                listContainer.innerHTML = '<div class="empty-state">该时段所有老师都有课</div>';
+            } else {
+                listContainer.innerHTML = `
+                    <div style="margin-bottom: 15px;">
+                        <strong style="color: #333;">没课教师 (${data.free_teachers.length}人):</strong>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                        ${data.free_teachers.map(t => `<span style="padding: 8px 16px; background: #667eea; color: white; border-radius: 20px; font-size: 14px;">${t}</span>`).join('')}
+                    </div>
+                `;
+            }
+            container.style.display = 'block';
+        }
+
         function renderAllSchedule() {
             const container = document.getElementById('allResult');
             const statsContainer = document.getElementById('statsRow');
@@ -645,6 +794,7 @@
             container.innerHTML = allSchedule.map(c => renderCourseCard(c)).join('');
         }
 
+        /* 调课功能已禁用
         async function searchOldCourse() {
             const date = document.getElementById('rescheduleOldDate').value;
             const startLesson = document.getElementById('rescheduleOldStart').value;
@@ -677,7 +827,9 @@
                 });
             }
         }
+        */
 
+        /* 调课功能已禁用
         document.getElementById('rescheduleOldCourse').addEventListener('change', function() {
             const option = this.options[this.selectedIndex];
             if (option.value) {
@@ -694,7 +846,8 @@
                 selectedOldCourse = null;
             }
         });
-
+        */
+        /*
         async function submitReschedule() {
             if (!selectedOldCourse) {
                 showNotification('请选择原课程', true);
@@ -739,12 +892,147 @@
                 showNotification(result.message || '调课失败', true);
             }
         }
+        */
+
+        async function loadTeacherSelect2() {
+            const res = await fetch('/api/teachers');
+            const teachers = await res.json();
+            const select = document.getElementById('teacherSelect2');
+            select.innerHTML = '<option value="">从列表选择</option>';
+            teachers.forEach(t => {
+                select.innerHTML += `<option value="${t}">${t}</option>`;
+            });
+        }
+
+        function addTeacherFromInput() {
+            const input = document.getElementById('teacherInput');
+            const teacher = input.value.trim();
+            if (teacher && !selectedTeachers.includes(teacher)) {
+                selectedTeachers.push(teacher);
+                renderSelectedTeachers();
+                input.value = '';
+            }
+        }
+
+        function addTeacherFromSelect() {
+            const select = document.getElementById('teacherSelect2');
+            const teacher = select.value;
+            if (teacher && !selectedTeachers.includes(teacher)) {
+                selectedTeachers.push(teacher);
+                renderSelectedTeachers();
+                select.value = '';
+            }
+        }
+
+        function removeTeacher(teacher) {
+            selectedTeachers = selectedTeachers.filter(t => t !== teacher);
+            renderSelectedTeachers();
+        }
+
+        function renderSelectedTeachers() {
+            const container = document.getElementById('selectedTeachersList');
+            if (selectedTeachers.length === 0) {
+                container.innerHTML = '<span style="color: #888;">暂无已选教师</span>';
+            } else {
+                container.innerHTML = selectedTeachers.map(t => `
+                    <span class="teacher-tag">
+                        ${t}
+                        <span class="remove-btn" onclick="removeTeacher('${t}')">×</span>
+                    </span>
+                `).join('');
+            }
+        }
+
+        async function searchCommonFreeSlots() {
+            if (selectedTeachers.length === 0) {
+                showNotification('请选择至少一位教师', true);
+                return;
+            }
+            
+            const startDate = document.getElementById('commonFreeStartDate').value;
+            const endDate = document.getElementById('commonFreeEndDate').value;
+            const startLesson = document.getElementById('commonFreeLessonStart').value;
+            const endLesson = document.getElementById('commonFreeLessonEnd').value;
+            
+            const res = await fetch('/api/common_free_slots', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    teachers: selectedTeachers,
+                    start_date: startDate || null,
+                    end_date: endDate || null,
+                    start_lesson: startLesson,
+                    end_lesson: endLesson
+                })
+            });
+            const data = await res.json();
+            
+            const container = document.getElementById('commonFreeResult');
+            if (data.common_free_slots.length === 0) {
+                container.innerHTML = '<div class="empty-state">没有找到所有教师都空闲的时段</div>';
+            } else {
+                container.innerHTML = `
+                    <div style="margin-bottom: 20px; padding: 15px; background: #f0f4ff; border-radius: 10px;">
+                        <strong>查询条件：</strong>
+                        <span style="margin-left: 10px;">教师：${selectedTeachers.join('、')}</span>
+                        <span style="margin-left: 20px;">时段：第${startLesson}-${endLesson}节</span>
+                        <span style="margin-left: 20px;">共找到 ${data.common_free_slots.length} 个空闲时段</span>
+                    </div>
+                    <div class="schedule-grid">
+                        ${data.common_free_slots.map(slot => `
+                            <div class="course-card" style="border-left-color: #38ef7d;">
+                                <div class="course-info">
+                                    <div class="info-item">
+                                        <span class="info-icon">📅</span>
+                                        <div>
+                                            <div class="info-label">日期</div>
+                                            <div class="info-text">${slot.date}</div>
+                                        </div>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-icon">📆</span>
+                                        <div>
+                                            <div class="info-label">星期</div>
+                                            <div class="info-text">${slot.weekday_name}</div>
+                                        </div>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-icon">🔢</span>
+                                        <div>
+                                            <div class="info-label">周次</div>
+                                            <div class="info-text">第${slot.week}周</div>
+                                        </div>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="info-icon">⏰</span>
+                                        <div>
+                                            <div class="info-label">节次</div>
+                                            <div class="info-text">第${slot.start_lesson}-${slot.end_lesson}节</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             const today = new Date().toISOString().split('T')[0];
-            document.getElementById('dateInput').value = today;
-            document.getElementById('rescheduleOldDate').value = today;
-            document.getElementById('rescheduleNewDate').value = today;
+            const nextWeek = new Date();
+            nextWeek.setDate(nextWeek.getDate() + 7);
+            const nextWeekStr = nextWeek.toISOString().split('T')[0];
+            
+            const dateInput = document.getElementById('dateInput');
+            if (dateInput) dateInput.value = today;
+            
+            const commonFreeStart = document.getElementById('commonFreeStartDate');
+            if (commonFreeStart) commonFreeStart.value = today;
+            
+            const commonFreeEnd = document.getElementById('commonFreeEndDate');
+            if (commonFreeEnd) commonFreeEnd.value = nextWeekStr;
+            
             loadTeachers();
             loadSchedule();
         });

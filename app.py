@@ -11,6 +11,7 @@ CACHE_FILE = os.path.join(BASE_DIR, 'schedule_cache.json')
 
 app = Flask(__name__)
 SEMESTER_START = datetime(2026, 3, 2)
+WEEKDAY_NAMES = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
 
 def parse_weeks(week_str):
     weeks = []
@@ -65,6 +66,18 @@ def get_week_from_date(date_str):
     week = days_diff // 7 + 1
     return week, date.weekday()
 
+def fix_encoding(text):
+    """Fix mojibake encoding - Excel data was GBK encoded but read as UTF-8"""
+    if not isinstance(text, str):
+        return text
+    # The Excel file contains GBK-encoded Chinese that was read as UTF-8
+    # To fix: encode as UTF-8 to get raw bytes, then decode as GBK
+    try:
+        return text.encode('utf-8').decode('gbk')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    return text
+
 def load_data():
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, 'r', encoding='utf-8') as f:
@@ -74,8 +87,8 @@ def load_data():
     schedule = []
     
     for _, row in df.iterrows():
-        teacher = row['教师']
-        course = row['课程名称']
+        teacher = str(row['教师'])
+        course = str(row['课程名称'])
         times = str(row['时间']).split(';')
         locations = str(row['地点']).split(';')
         classes = str(row['班级组成'])
@@ -111,9 +124,20 @@ def save_schedule(schedule):
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(schedule, f, ensure_ascii=False)
 
+@app.after_request
+def add_no_cache_headers(response):
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/test_teachers.html')
+def test_teachers():
+    return render_template('test_teachers.html')
 
 @app.route('/api/schedule')
 def api_schedule():
@@ -174,68 +198,105 @@ def api_lesson_schedule(weekday, lesson):
     ]
     return jsonify(lesson_schedule)
 
-@app.route('/api/reschedule', methods=['POST'])
-def api_reschedule():
+@app.route('/api/free_teachers', methods=['POST'])
+def api_free_teachers():
     data = request.json
+    date = data.get('date')
+    start_lesson = data.get('start_lesson')
+    end_lesson = data.get('end_lesson')
+    
+    if not date:
+        return jsonify({'error': '请选择日期'}), 400
+    
+    week, weekday = get_week_from_date(date)
     schedule = get_schedule()
     
-    old_date = data.get('old_date')
-    old_start = data.get('old_start_lesson')
-    old_end = data.get('old_end_lesson')
-    old_teacher = data.get('old_teacher')
+    all_teachers = set(item['teacher'] for item in schedule)
     
-    new_date = data.get('new_date')
-    new_start = data.get('new_start_lesson')
-    new_end = data.get('new_end_lesson')
-    new_weekday = data.get('new_weekday')
-    new_location = data.get('new_location')
-    
-    old_week, old_weekday = get_week_from_date(old_date)
-    new_week, _ = get_week_from_date(new_date)
-    
-    found = False
+    busy_teachers = set()
     for item in schedule:
-        if (item['teacher'] == old_teacher and 
-            item['weekday'] == old_weekday and 
-            item['start_lesson'] == int(old_start) and
-            item['end_lesson'] == int(old_end) and
-            old_week in item['weeks']):
-            item['weekday'] = int(new_weekday)
-            item['start_lesson'] = int(new_start)
-            item['end_lesson'] = int(new_end)
-            if new_location:
-                item['location'] = new_location
-            if new_week:
-                item['weeks'] = [new_week]
-            found = True
-            break
+        if item['weekday'] == weekday and week in item['weeks']:
+            if start_lesson and end_lesson:
+                if not (item['end_lesson'] < int(start_lesson) or item['start_lesson'] > int(end_lesson)):
+                    busy_teachers.add(item['teacher'])
+            else:
+                busy_teachers.add(item['teacher'])
     
-    if found:
-        save_schedule(schedule)
-        return jsonify({'success': True, 'message': '调课成功'})
-    else:
-        return jsonify({'success': False, 'message': '未找到原课程'}), 400
+    free_teachers = sorted(list(all_teachers - busy_teachers))
+    
+    return jsonify({
+        'date': date,
+        'week': week,
+        'weekday': weekday,
+        'free_teachers': free_teachers,
+        'busy_teachers': sorted(list(busy_teachers))
+    })
 
-@app.route('/api/add_course', methods=['POST'])
-def api_add_course():
+@app.route('/api/common_free_slots', methods=['POST'])
+def api_common_free_slots():
     data = request.json
+    teachers = data.get('teachers', [])
+    start_date = data.get('start_date')
+    end_date = data.get('end_date')
+    start_lesson = data.get('start_lesson', 1)
+    end_lesson = data.get('end_lesson', 11)
+    
+    if not teachers:
+        return jsonify({'error': '请选择教师'}), 400
+    
     schedule = get_schedule()
     
-    new_course = {
-        'id': data.get('id', f"new_{len(schedule)}"),
-        'teacher': data['teacher'],
-        'course': data['course'],
-        'weekday': int(data['weekday']),
-        'start_lesson': int(data['start_lesson']),
-        'end_lesson': int(data['end_lesson']),
-        'weeks': [int(w) for w in data['weeks']],
-        'location': data['location'],
-        'classes': data.get('classes', '')
-    }
+    teacher_schedules = {}
+    for teacher in teachers:
+        teacher_schedules[teacher] = [
+            item for item in schedule if item['teacher'] == teacher
+        ]
     
-    schedule.append(new_course)
-    save_schedule(schedule)
-    return jsonify({'success': True, 'schedule': schedule})
+    if not start_date:
+        start_date = SEMESTER_START.strftime('%Y-%m-%d')
+    if not end_date:
+        end_date = (SEMESTER_START + timedelta(weeks=20)).strftime('%Y-%m-%d')
+    
+    common_free_slots = []
+    current_date = datetime.strptime(start_date, '%Y-%m-%d')
+    end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+    
+    while current_date <= end_datetime:
+        week, weekday = get_week_from_date(current_date.strftime('%Y-%m-%d'))
+        date_str = current_date.strftime('%Y-%m-%d')
+        
+        all_free = True
+        for teacher in teachers:
+            teacher_busy = False
+            for item in teacher_schedules[teacher]:
+                if item['weekday'] == weekday and week in item['weeks']:
+                    if not (item['end_lesson'] < int(start_lesson) or item['start_lesson'] > int(end_lesson)):
+                        teacher_busy = True
+                        break
+            if not teacher_busy:
+                pass
+            else:
+                all_free = False
+                break
+        
+        if all_free and len(teachers) > 0:
+            teachers_checked = all(teacher in teacher_schedules for teacher in teachers)
+            if teachers_checked:
+                common_free_slots.append({
+                    'date': date_str,
+                    'week': week,
+                    'weekday': weekday,
+                    'weekday_name': WEEKDAY_NAMES[weekday],
+                    'start_lesson': int(start_lesson),
+                    'end_lesson': int(end_lesson)
+                })
+        
+        current_date += timedelta(days=1)
+    
+    return jsonify({
+        'teachers': teachers,
+        'common_free_slots': common_free_slots
+    })
 
 @app.route('/chat')
 def chat_page():
