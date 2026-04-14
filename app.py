@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timedelta
 import json
 import os
+import requests
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, '教师课表 1.xlsx')
@@ -12,6 +13,9 @@ CACHE_FILE = os.path.join(BASE_DIR, 'schedule_cache.json')
 app = Flask(__name__)
 SEMESTER_START = datetime(2026, 3, 2)
 WEEKDAY_NAMES = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
+DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions'
 
 def parse_weeks(week_str):
     weeks = []
@@ -302,6 +306,61 @@ def api_common_free_slots():
 def chat_page():
     return render_template('chat.html')
 
+def call_deepseek_llm(query, all_teachers):
+    """使用 DeepSeek LLM 理解用户查询，返回结构化的意图"""
+    if not DEEPSEEK_API_KEY:
+        return None
+    
+    system_prompt = f'''你是一个课表查询助手，需要理解用户的自然语言查询并提取结构化信息。
+
+当前系统中有以下教师：{", ".join(all_teachers)}
+
+请分析用户查询，返回 JSON 格式的结果，包含以下字段：
+- intent: 查询意图类型，可选值："teacher_schedule" (查询某老师课表), "teachers_with_class" (查询某时段有课老师), "teachers_without_class" (查询某时段没课老师), "unknown" (未知)
+- teacher: 教师姓名 (如果查询中包含)
+- weekday: 星期几 (0-6，0 表示星期一，6 表示星期日)
+- date: 日期字符串 (如"4 月 30 日")
+- start_lesson: 开始节次 (1-11)
+- end_lesson: 结束节次 (1-11)
+- time_period: 时间段 ("上午", "下午", "晚上", "早上")
+
+注意：
+- 星期一=0, 星期二=1, 星期三=2, 星期四=3, 星期五=4, 星期六=5, 星期日=6
+- 上午=1-4 节，下午=5-8 节，晚上=9-11 节，早上=1-4 节
+- 如果用户查询的教师不在教师列表中，teacher 字段返回 null
+- 只返回 JSON，不要其他内容'''
+
+    try:
+        response = requests.post(
+            DEEPSEEK_API_URL,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {DEEPSEEK_API_KEY}'
+            },
+            json={
+                'model': 'deepseek-chat',
+                'messages': [
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': query}
+                ],
+                'temperature': 0.1,
+                'max_tokens': 500
+            },
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result['choices'][0]['message']['content'].strip()
+            # 清理可能的 markdown 标记
+            content = re.sub(r'```json\s*', '', content)
+            content = re.sub(r'```\s*', '', content)
+            return json.loads(content)
+    except Exception as e:
+        print(f'DeepSeek API 调用失败：{e}')
+    
+    return None
+
 def parse_date_query(query):
     """解析日期查询，返回 (weekday, start_lesson, end_lesson) 或 (None, None, None)"""
     weekday_map = {'星期一': 0, '星期二': 1, '星期三': 2, '星期四': 3, '星期五': 4, '星期六': 5, '星期日': 6}
@@ -370,59 +429,93 @@ def api_chat():
     all_teachers = set(item['teacher'] for item in schedule)
     all_teachers_list = sorted(list(all_teachers))
     
-    # 解析用户输入
-    query_lower = query.lower()
+    # 首先尝试使用 LLM 理解用户查询
+    llm_result = call_deepseek_llm(query, all_teachers_list)
     
-    # 1. 查询某个老师的课表 - 优先检查是否包含老师姓名
+    # 从 LLM 结果中提取信息
+    intent = 'unknown'
     teacher_match = None
-    for teacher in all_teachers:
-        if teacher in query:
-            teacher_match = teacher
-            break
+    weekday = None
+    start_lesson = None
+    end_lesson = None
+    time_period = None
     
-    # 检查是否是查询老师课表的意图但没有找到老师
-    teacher_query_patterns = ['老师的课表', '老师有什么课', '老师的课程', '老师周几', '老师什么时候有课']
-    is_teacher_query = any(pattern in query for pattern in teacher_query_patterns)
+    if llm_result:
+        intent = llm_result.get('intent', 'unknown')
+        teacher_match = llm_result.get('teacher')
+        weekday = llm_result.get('weekday')
+        start_lesson = llm_result.get('start_lesson')
+        end_lesson = llm_result.get('end_lesson')
+        time_period = llm_result.get('time_period')
+        
+        # 处理时间段
+        if time_period == '上午' or time_period == '早上':
+            start_lesson, end_lesson = 1, 4
+        elif time_period == '下午':
+            start_lesson, end_lesson = 5, 8
+        elif time_period == '晚上':
+            start_lesson, end_lesson = 9, 11
     
-    # 检查是否包含类似老师姓名的模式 (如"XXX 老师")
+    # 如果 LLM 没有识别出教师，但查询中包含教师姓名模式，检查是否是不存在的教师
     if not teacher_match:
         name_match = re.search(r'([\u4e00-\u9fa5]{2,4}) 老师', query)
         if name_match:
             potential_name = name_match.group(1)
+            if potential_name not in all_teachers:
+                return jsonify({
+                    'response': f'抱歉，教师列表中没有找到"{potential_name}"老师。\n\n可选教师：{", ".join(all_teachers_list[:10])}{"..." if len(all_teachers_list) > 10 else ""}',
+                    'suggestions': ['蔡沂老师的课表', '常京老师的课表', '查询其他老师']
+                })
+    
+    # 如果 LLM 没有识别出教师，使用规则匹配
+    if not teacher_match:
+        for teacher in all_teachers:
+            if teacher in query:
+                teacher_match = teacher
+                break
+    
+    # 1. 查询某个老师的课表
+    if teacher_match or intent == 'teacher_schedule':
+        if teacher_match:
+            if teacher_match not in all_teachers:
+                return jsonify({
+                    'response': f'抱歉，教师列表中没有找到"{teacher_match}"老师。\n\n可选教师：{", ".join(all_teachers_list[:10])}{"..." if len(all_teachers_list) > 10 else ""}',
+                    'suggestions': ['蔡沂老师的课表', '常京老师的课表', '查询其他老师']
+                })
+            
+            teacher_schedule = [item for item in schedule if item['teacher'] == teacher_match]
+            if len(teacher_schedule) == 0:
+                return jsonify({'response': f'抱歉，没有找到 {teacher_match} 老师的课程信息。'})
+            
+            response = f'{teacher_match}老师的课程安排：\n\n'
+            courses = {}
+            for item in teacher_schedule:
+                key = item['course']
+                if key not in courses:
+                    courses[key] = []
+                courses[key].append(item)
+            
+            for course, items in courses.items():
+                response += f'📚 {course}:\n'
+                for item in items:
+                    response += f'  - {WEEKDAY_NAMES[item["weekday"]]} 第{item["start_lesson"]}-{item["end_lesson"]}节 ({item["location"]})\n'
+                response += '\n'
+            
             return jsonify({
-                'response': f'抱歉，教师列表中没有找到"{potential_name}"老师。\n\n可选教师：{", ".join(all_teachers_list[:10])}{"..." if len(all_teachers_list) > 10 else ""}',
-                'suggestions': ['蔡沂老师的课表', '常京老师的课表', '查询其他老师']
+                'response': response,
+                'suggestions': [f'{teacher_match}老师周几有课', '查询其他老师']
             })
     
-    if teacher_match:
-        teacher_schedule = [item for item in schedule if item['teacher'] == teacher_match]
-        if len(teacher_schedule) == 0:
-            return jsonify({'response': f'抱歉，没有找到 {teacher_match} 老师的课程信息。'})
-        
-        response = f'{teacher_match}老师的课程安排：\n\n'
-        courses = {}
-        for item in teacher_schedule:
-            key = item['course']
-            if key not in courses:
-                courses[key] = []
-            courses[key].append(item)
-        
-        for course, items in courses.items():
-            response += f'📚 {course}:\n'
-            for item in items:
-                response += f'  - {WEEKDAY_NAMES[item["weekday"]]} 第{item["start_lesson"]}-{item["end_lesson"]}节 ({item["location"]})\n'
-            response += '\n'
-        
-        return jsonify({
-            'response': response,
-            'suggestions': [f'{teacher_match}老师周几有课', '查询其他老师']
-        })
-    
-    # 解析时间信息
-    weekday, start_lesson, end_lesson = parse_date_query(query)
+    # 如果 LLM 没有解析出星期，使用规则解析
+    if weekday is None:
+        weekday, rule_start, rule_end = parse_date_query(query)
+        if start_lesson is None:
+            start_lesson = rule_start
+        if end_lesson is None:
+            end_lesson = rule_end
     
     # 2. 查询某个时段下，哪些老师有课/没课
-    has_time_ref = weekday is not None or '有课' in query_lower or '没课' in query_lower or '空闲' in query_lower or '早上' in query
+    has_time_ref = weekday is not None or '有课' in query or '没课' in query or '空闲' in query or '早上' in query
     
     if has_time_ref:
         if weekday is None:
@@ -431,7 +524,7 @@ def api_chat():
                 'suggestions': ['星期一上午哪些老师有课', '星期三下午哪些老师没课', '星期五第 3-4 节哪些老师有课']
             })
         
-        if '没课' in query_lower or '没有课' in query_lower or '空闲' in query_lower:
+        if '没课' in query or '没有课' in query or '空闲' in query or intent == 'teachers_without_class':
             busy_teachers = set()
             for item in schedule:
                 if item['weekday'] == weekday:
