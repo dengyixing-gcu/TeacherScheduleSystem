@@ -302,6 +302,62 @@ def api_common_free_slots():
 def chat_page():
     return render_template('chat.html')
 
+def parse_date_query(query):
+    """解析日期查询，返回 (weekday, start_lesson, end_lesson) 或 (None, None, None)"""
+    weekday_map = {'星期一': 0, '星期二': 1, '星期三': 2, '星期四': 3, '星期五': 4, '星期六': 5, '星期日': 6}
+    weekday = None
+    start_lesson = None
+    end_lesson = None
+    
+    # 解析星期
+    for name, day in weekday_map.items():
+        if name in query:
+            weekday = day
+            break
+    
+    if '今天' in query:
+        weekday = datetime.now().weekday()
+    elif '明天' in query:
+        weekday = (datetime.now().weekday() + 1) % 7
+    elif '后天' in query:
+        weekday = (datetime.now().weekday() + 2) % 7
+    
+    # 解析具体日期 (如"4 月 30 日"、"4 月 30 号"、"4 月 30")
+    date_match = re.search(r'(\d{1,2}) 月 (\d{1,2})(?:日 | 号)?', query)
+    if date_match:
+        month = int(date_match.group(1))
+        day = int(date_match.group(2))
+        year = SEMESTER_START.year
+        try:
+            query_date = datetime(year, month, day)
+            days_diff = (query_date - SEMESTER_START).days
+            week_num = days_diff // 7 + 1
+            weekday = query_date.weekday()
+        except ValueError:
+            pass
+    
+    # 解析节次
+    lesson_match = re.search(r'第 (\d+)-(\d+) 节', query)
+    if lesson_match:
+        start_lesson = int(lesson_match.group(1))
+        end_lesson = int(lesson_match.group(2))
+    else:
+        lesson_match = re.search(r'第 (\d+) 节', query)
+        if lesson_match:
+            start_lesson = int(lesson_match.group(1))
+            end_lesson = int(lesson_match.group(1))
+    
+    if '上午' in query:
+        start_lesson, end_lesson = 1, 4
+    elif '下午' in query:
+        start_lesson, end_lesson = 5, 8
+    elif '晚上' in query:
+        start_lesson, end_lesson = 9, 11
+    elif '早上' in query:
+        start_lesson, end_lesson = 1, 4
+    
+    return weekday, start_lesson, end_lesson
+
 @app.route('/api/chat', methods=['POST'])
 def api_chat():
     data = request.json
@@ -312,16 +368,31 @@ def api_chat():
     
     schedule = get_schedule()
     all_teachers = set(item['teacher'] for item in schedule)
+    all_teachers_list = sorted(list(all_teachers))
     
     # 解析用户输入
     query_lower = query.lower()
     
-    # 1. 查询某个老师的课表
+    # 1. 查询某个老师的课表 - 优先检查是否包含老师姓名
     teacher_match = None
     for teacher in all_teachers:
         if teacher in query:
             teacher_match = teacher
             break
+    
+    # 检查是否是查询老师课表的意图但没有找到老师
+    teacher_query_patterns = ['老师的课表', '老师有什么课', '老师的课程', '老师周几', '老师什么时候有课']
+    is_teacher_query = any(pattern in query for pattern in teacher_query_patterns)
+    
+    # 检查是否包含类似老师姓名的模式 (如"XXX 老师")
+    if not teacher_match:
+        name_match = re.search(r'([\u4e00-\u9fa5]{2,4}) 老师', query)
+        if name_match:
+            potential_name = name_match.group(1)
+            return jsonify({
+                'response': f'抱歉，教师列表中没有找到"{potential_name}"老师。\n\n可选教师：{", ".join(all_teachers_list[:10])}{"..." if len(all_teachers_list) > 10 else ""}',
+                'suggestions': ['蔡沂老师的课表', '常京老师的课表', '查询其他老师']
+            })
     
     if teacher_match:
         teacher_schedule = [item for item in schedule if item['teacher'] == teacher_match]
@@ -347,134 +418,20 @@ def api_chat():
             'suggestions': [f'{teacher_match}老师周几有课', '查询其他老师']
         })
     
+    # 解析时间信息
+    weekday, start_lesson, end_lesson = parse_date_query(query)
+    
     # 2. 查询某个时段下，哪些老师有课/没课
-    time_patterns = [
-        r'(星期 [一二三四五六日]|今天 | 明天 | 后天)',
-        r'(第 [1-9]|10|11) 节',
-        r'(上午 | 下午 | 晚上)',
-        r'(全天 | 所有时段)'
-    ]
+    has_time_ref = weekday is not None or '有课' in query_lower or '没课' in query_lower or '空闲' in query_lower or '早上' in query
     
-    has_time_ref = any(re.search(pattern, query_lower) for pattern in time_patterns)
-    
-    if has_time_ref or '有课' in query_lower or '没课' in query_lower or '空闲' in query_lower:
-        weekday = None
-        start_lesson = None
-        end_lesson = None
+    if has_time_ref:
+        if weekday is None:
+            return jsonify({
+                'response': '请指定要查询的日期或星期，例如："星期一上午哪些老师有课"、"4 月 30 日早上哪些老师没课"',
+                'suggestions': ['星期一上午哪些老师有课', '星期三下午哪些老师没课', '星期五第 3-4 节哪些老师有课']
+            })
         
-        weekday_map = {'星期一': 0, '星期二': 1, '星期三': 2, '星期四': 3, '星期五': 4, '星期六': 5, '星期日': 6}
-        for name, day in weekday_map.items():
-            if name in query:
-                weekday = day
-                break
-        
-        if '今天' in query:
-            weekday = datetime.now().weekday()
-        elif '明天' in query:
-            weekday = (datetime.now().weekday() + 1) % 7
-        elif '后天' in query:
-            weekday = (datetime.now().weekday() + 2) % 7
-        
-        lesson_match = re.search(r'第 (\d+)-(\d+) 节', query)
-        if lesson_match:
-            start_lesson = int(lesson_match.group(1))
-            end_lesson = int(lesson_match.group(2))
-        else:
-            lesson_match = re.search(r'第 (\d+) 节', query)
-            if lesson_match:
-                start_lesson = int(lesson_match.group(1))
-                end_lesson = int(lesson_match.group(1))
-        
-        if '上午' in query:
-            start_lesson, end_lesson = 1, 4
-        elif '下午' in query:
-            start_lesson, end_lesson = 5, 8
-        elif '晚上' in query:
-            start_lesson, end_lesson = 9, 11
-        
-        if weekday is not None:
-            if '没课' in query_lower or '空闲' in query_lower or '没有课' in query_lower:
-                busy_teachers = set()
-                for item in schedule:
-                    if item['weekday'] == weekday:
-                        if start_lesson and end_lesson:
-                            if not (item['end_lesson'] < start_lesson or item['start_lesson'] > end_lesson):
-                                busy_teachers.add(item['teacher'])
-                        else:
-                            busy_teachers.add(item['teacher'])
-                
-                free_teachers = sorted(list(all_teachers - busy_teachers))
-                if len(free_teachers) == 0:
-                    response = f'{WEEKDAY_NAMES[weekday]}'
-                    if start_lesson and end_lesson:
-                        response += f' 第{start_lesson}-{end_lesson}节'
-                    response += '所有老师都有课。'
-                else:
-                    response = f'{WEEKDAY_NAMES[weekday]}'
-                    if start_lesson and end_lesson:
-                        response += f' 第{start_lesson}-{end_lesson}节'
-                    response += f' 没有课的老师 ({len(free_teachers)}人):\n\n'
-                    response += '、'.join(free_teachers)
-                
-                return jsonify({'response': response})
-            else:
-                busy_teachers_dict = {}
-                for item in schedule:
-                    if item['weekday'] == weekday:
-                        if start_lesson and end_lesson:
-                            if not (item['end_lesson'] < start_lesson or item['start_lesson'] > end_lesson):
-                                if item['teacher'] not in busy_teachers_dict:
-                                    busy_teachers_dict[item['teacher']] = []
-                                busy_teachers_dict[item['teacher']].append(item)
-                        else:
-                            if item['teacher'] not in busy_teachers_dict:
-                                busy_teachers_dict[item['teacher']] = []
-                            busy_teachers_dict[item['teacher']].append(item)
-                
-                if len(busy_teachers_dict) == 0:
-                    response = f'{WEEKDAY_NAMES[weekday]}'
-                    if start_lesson and end_lesson:
-                        response += f' 第{start_lesson}-{end_lesson}节'
-                    response += '没有老师有课。'
-                else:
-                    response = f'{WEEKDAY_NAMES[weekday]}'
-                    if start_lesson and end_lesson:
-                        response += f' 第{start_lesson}-{end_lesson}节'
-                    response += f' 有课的老师 ({len(busy_teachers_dict)}人):\n\n'
-                    for teacher in sorted(busy_teachers_dict.keys()):
-                        response += f'{teacher}: '
-                        courses = set(item['course'] for item in busy_teachers_dict[teacher])
-                        response += '、'.join(courses)
-                        response += '\n'
-                
-                return jsonify({'response': response})
-    
-    # 3. 查询哪些老师在某个时段内都没有课
-    common_free_match = re.search(r'哪些老师 (在.*?) 都没有课', query)
-    if common_free_match or ('哪些老师' in query and '没有课' in query):
-        weekday = None
-        start_lesson = None
-        end_lesson = None
-        
-        weekday_map = {'星期一': 0, '星期二': 1, '星期三': 2, '星期四': 3, '星期五': 4, '星期六': 5, '星期日': 6}
-        for name, day in weekday_map.items():
-            if name in query:
-                weekday = day
-                break
-        
-        lesson_match = re.search(r'第 (\d+)-(\d+) 节', query)
-        if lesson_match:
-            start_lesson = int(lesson_match.group(1))
-            end_lesson = int(lesson_match.group(2))
-        
-        if '上午' in query:
-            start_lesson, end_lesson = 1, 4
-        elif '下午' in query:
-            start_lesson, end_lesson = 5, 8
-        elif '晚上' in query:
-            start_lesson, end_lesson = 9, 11
-        
-        if weekday is not None:
+        if '没课' in query_lower or '没有课' in query_lower or '空闲' in query_lower:
             busy_teachers = set()
             for item in schedule:
                 if item['weekday'] == weekday:
@@ -485,19 +442,54 @@ def api_chat():
                         busy_teachers.add(item['teacher'])
             
             free_teachers = sorted(list(all_teachers - busy_teachers))
-            response = f'{WEEKDAY_NAMES[weekday]}'
+            time_desc = f'{WEEKDAY_NAMES[weekday]}'
             if start_lesson and end_lesson:
-                response += f' 第{start_lesson}-{end_lesson}节'
-            response += f' 没有课的老师:\n\n'
+                time_desc += f' 第{start_lesson}-{end_lesson}节'
+            elif start_lesson:
+                time_desc += f' 第{start_lesson}节'
+            
             if len(free_teachers) == 0:
-                response += '该时段所有老师都有课。'
+                response = f'{time_desc}所有老师都有课。'
             else:
+                response = f'{time_desc}没有课的老师 ({len(free_teachers)}人):\n\n'
                 response += '、'.join(free_teachers)
+            
+            return jsonify({'response': response})
+        else:
+            busy_teachers_dict = {}
+            for item in schedule:
+                if item['weekday'] == weekday:
+                    if start_lesson and end_lesson:
+                        if not (item['end_lesson'] < start_lesson or item['start_lesson'] > end_lesson):
+                            if item['teacher'] not in busy_teachers_dict:
+                                busy_teachers_dict[item['teacher']] = []
+                            busy_teachers_dict[item['teacher']].append(item)
+                    else:
+                        if item['teacher'] not in busy_teachers_dict:
+                            busy_teachers_dict[item['teacher']] = []
+                        busy_teachers_dict[item['teacher']].append(item)
+            
+            time_desc = f'{WEEKDAY_NAMES[weekday]}'
+            if start_lesson and end_lesson:
+                time_desc += f' 第{start_lesson}-{end_lesson}节'
+            elif start_lesson:
+                time_desc += f' 第{start_lesson}节'
+            
+            if len(busy_teachers_dict) == 0:
+                response = f'{time_desc}没有老师有课。'
+            else:
+                response = f'{time_desc}有课的老师 ({len(busy_teachers_dict)}人):\n\n'
+                for teacher in sorted(busy_teachers_dict.keys()):
+                    response += f'{teacher}: '
+                    courses = set(item['course'] for item in busy_teachers_dict[teacher])
+                    response += '、'.join(courses)
+                    response += '\n'
+            
             return jsonify({'response': response})
     
     return jsonify({
-        'response': '抱歉，我暂时无法理解您的问题。我可以帮您:\n\n1. 查询某个老师的课表（例如："宁辉老师有什么课"）\n2. 查询某个时段哪些老师有课（例如："星期一上午哪些老师有课"）\n3. 查询某个时段哪些老师没课（例如："星期三下午哪些老师没课"）\n4. 查询共同空闲时段（例如："哪些老师星期五都没有课"）',
-        'suggestions': ['蔡沂老师的课表', '星期一上午哪些老师有课', '星期三下午哪些老师没课']
+        'response': '抱歉，我暂时无法理解您的问题。我可以帮您:\n\n1. 查询某个老师的课表（例如："蔡沂老师有什么课"）\n2. 查询某个时段哪些老师有课（例如："星期一上午哪些老师有课"、"4 月 30 日早上哪些老师有课"）\n3. 查询某个时段哪些老师没课（例如："星期三下午哪些老师没课"）',
+        'suggestions': ['蔡沂老师的课表', '星期一上午哪些老师有课', '4 月 30 日早上哪些老师没课']
     })
 
 @app.route('/health')
